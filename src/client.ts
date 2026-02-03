@@ -142,8 +142,9 @@ export class ScrapboxClient {
     const page = await ctx.newPage();
     const url = new URL(`${this.host}/${encodePathSegment(this.project)}/${encodePathSegment(pageTitle)}`);
     await page.goto(url.toString(), { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('.line');
+    await page.waitForSelector('.line', { state: 'attached' });
     if (opts.waitMs && opts.waitMs > 0) await page.waitForTimeout(opts.waitMs);
+    await page.click('body');
 
     await applyOps(page, ops, lines);
     await page.close();
@@ -243,7 +244,7 @@ async function deleteLines(page: Page, index: number, count: number, lines: Line
     const lineInfo = lines[index + i];
     const line = await findLine(page, lineInfo, index);
     await line.scrollIntoViewIfNeeded();
-    await line.click();
+    await line.click({ force: true });
     await selectAll(page);
     await page.keyboard.press('Backspace');
     await page.keyboard.press('Backspace');
@@ -260,7 +261,7 @@ async function insertLines(page: Page, index: number, insertLines: string[], lin
     if (anchorInfo) {
       const anchor = await findLine(page, anchorInfo, anchorIndex);
       await anchor.scrollIntoViewIfNeeded();
-      await anchor.click();
+      await anchor.click({ force: true });
       await moveToStart(page);
       await page.keyboard.press('Enter');
       await page.keyboard.insertText(insertLines.join('\n'));
@@ -273,7 +274,7 @@ async function insertLines(page: Page, index: number, insertLines: string[], lin
   const anchorInfo = lines[anchorIndex];
   const anchor = await findLine(page, anchorInfo, anchorIndex);
   await anchor.scrollIntoViewIfNeeded();
-  await anchor.click();
+  await anchor.click({ force: true });
   await moveToEnd(page);
   await page.keyboard.press('Enter');
   await page.keyboard.insertText(insertLines.join('\n'));
