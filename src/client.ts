@@ -144,9 +144,14 @@ export class ScrapboxClient {
     await page.goto(url.toString(), { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#editor .line', { state: 'attached' });
     if (opts.waitMs && opts.waitMs > 0) await page.waitForTimeout(opts.waitMs);
-    await page.click('#editor');
 
-    await applyOps(page, ops, lines);
+    const newLines = splitLines(newText);
+    const internal = await tryInternalPatch(page, newLines);
+    if (!internal) {
+      await page.click('#editor');
+      await applyOps(page, ops, lines);
+    }
+
     await page.close();
 
     const after = await this.readJson(pageTitle);
@@ -314,6 +319,34 @@ async function focusLine(line: ReturnType<Page['locator']>) {
     return;
   }
   await line.click({ force: true });
+}
+
+async function tryInternalPatch(page: Page, newLines: string[]) {
+  try {
+    const result = await page.evaluate(async (lines) => {
+      const sb: any = (window as any).scrapbox;
+      if (!sb?.Page?.updateLine || !sb?.Page?.insertLine || !sb?.Page?.waitForSave) return false;
+      const current = (sb.Page.lines || []).map((l: any) => l?.text ?? '');
+      const oldLen = current.length;
+      const newLen = lines.length;
+      const min = Math.min(oldLen, newLen);
+
+      for (let i = 0; i < min; i++) {
+        if (lines[i] !== current[i]) sb.Page.updateLine(lines[i], i);
+      }
+      if (newLen > oldLen) {
+        for (let i = oldLen; i < newLen; i++) sb.Page.insertLine(lines[i], i);
+      } else if (oldLen > newLen) {
+        for (let i = oldLen - 1; i >= newLen; i--) sb.Page.updateLine('', i);
+      }
+
+      await sb.Page.waitForSave();
+      return true;
+    }, newLines);
+    return Boolean(result);
+  } catch {
+    return false;
+  }
 }
 
 async function selectAll(page: Page) {
