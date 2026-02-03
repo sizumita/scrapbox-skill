@@ -142,9 +142,9 @@ export class ScrapboxClient {
     const page = await ctx.newPage();
     const url = new URL(`${this.host}/${encodePathSegment(this.project)}/${encodePathSegment(pageTitle)}`);
     await page.goto(url.toString(), { waitUntil: 'domcontentloaded' });
-    await page.waitForSelector('.line', { state: 'attached' });
+    await page.waitForSelector('#editor .line', { state: 'attached' });
     if (opts.waitMs && opts.waitMs > 0) await page.waitForTimeout(opts.waitMs);
-    await page.click('body');
+    await page.click('#editor');
 
     await applyOps(page, ops, lines);
     await page.close();
@@ -244,7 +244,7 @@ async function deleteLines(page: Page, index: number, count: number, lines: Line
     const lineInfo = lines[index + i];
     const line = await findLine(page, lineInfo, index);
     await line.scrollIntoViewIfNeeded();
-    await line.click({ force: true });
+    await focusLine(line);
     await selectAll(page);
     await page.keyboard.press('Backspace');
     await page.keyboard.press('Backspace');
@@ -261,7 +261,7 @@ async function insertLines(page: Page, index: number, insertLines: string[], lin
     if (anchorInfo) {
       const anchor = await findLine(page, anchorInfo, anchorIndex);
       await anchor.scrollIntoViewIfNeeded();
-      await anchor.click({ force: true });
+      await focusLine(anchor);
       await moveToStart(page);
       await page.keyboard.press('Enter');
       await page.keyboard.insertText(insertLines.join('\n'));
@@ -274,7 +274,7 @@ async function insertLines(page: Page, index: number, insertLines: string[], lin
   const anchorInfo = lines[anchorIndex];
   const anchor = await findLine(page, anchorInfo, anchorIndex);
   await anchor.scrollIntoViewIfNeeded();
-  await anchor.click({ force: true });
+  await focusLine(anchor);
   await moveToEnd(page);
   await page.keyboard.press('Enter');
   await page.keyboard.insertText(insertLines.join('\n'));
@@ -284,6 +284,8 @@ async function insertLines(page: Page, index: number, insertLines: string[], lin
 async function findLine(page: Page, info: LineInfo | undefined, index: number) {
   if (info?.id) {
     const selectors = [
+      `#editor #L${info.id}`,
+      `#editor [id="L${info.id}"]`,
       `[data-line-id="${info.id}"]`,
       `[data-id="${info.id}"]`,
       `[data-lineid="${info.id}"]`,
@@ -294,15 +296,24 @@ async function findLine(page: Page, info: LineInfo | undefined, index: number) {
     }
   }
 
-  const byIndex = page.locator('.line').nth(index);
+  const byIndex = page.locator('#editor .line').nth(index);
   if ((await byIndex.count()) > 0) return byIndex;
 
   if (info?.text) {
-    const byText = page.locator('.line', { hasText: info.text });
+    const byText = page.locator('#editor .line', { hasText: info.text });
     if ((await byText.count()) > 0) return byText.first();
   }
 
   throw new Error(`Line not found at index ${index}`);
+}
+
+async function focusLine(line: ReturnType<Page['locator']>) {
+  const text = line.locator('.text');
+  if ((await text.count()) > 0) {
+    await text.first().click({ force: true });
+    return;
+  }
+  await line.click({ force: true });
 }
 
 async function selectAll(page: Page) {
