@@ -154,12 +154,17 @@ export class ScrapboxClient {
 
     await page.close();
 
+    await sleep(500);
     const after = await this.readJson(pageTitle);
     const afterText = linesToText(extractLines(after));
     if (afterText !== newText) {
       throw new Error('Verification failed (content mismatch after patch)');
     }
   }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeHost(host: string) {
