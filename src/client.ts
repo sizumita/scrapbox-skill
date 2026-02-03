@@ -1,4 +1,7 @@
-import { chromium, type Browser, type BrowserContext } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import Diff from 'diff';
+
+const { applyPatch, parsePatch, diffLines } = Diff;
 
 export type ClientOptions = {
   project: string;
@@ -11,6 +14,20 @@ export type ListOptions = {
   limit?: number;
   skip?: number;
 };
+
+export type PatchOptions = {
+  fuzz?: number;
+  checkUpdated?: boolean;
+  waitMs?: number;
+  debug?: boolean;
+  dryRun?: boolean;
+};
+
+type LineInfo = { id?: string; text: string };
+
+type PatchOp =
+  | { type: 'remove'; index: number; count: number }
+  | { type: 'insert'; index: number; lines: string[] };
 
 export class ScrapboxClient {
   private browser: Browser | null = null;
@@ -100,6 +117,45 @@ export class ScrapboxClient {
     if (waitMs > 0) await page.waitForTimeout(waitMs);
     await page.close();
   }
+
+  async patch(pageTitle: string, diffText: string, opts: PatchOptions = {}): Promise<string | void> {
+    const pageJson = await this.readJson(pageTitle);
+    const baseUpdated = pageJson.updated;
+    const lines = extractLines(pageJson);
+    const originalText = linesToText(lines);
+
+    const patch = parseFirstPatch(diffText);
+    const newText = applyPatch(originalText, patch, { fuzz: opts.fuzz ?? 0 });
+    if (newText === false) throw new Error('Patch apply failed');
+
+    if (opts.dryRun) return newText;
+
+    if (opts.checkUpdated) {
+      const latest = await this.readJson(pageTitle);
+      if (latest.updated !== baseUpdated) {
+        throw new Error('Page was updated before patch (updated mismatch)');
+      }
+    }
+
+    const ops = buildOps(originalText, newText);
+    if (ops.length === 0) return;
+
+    const ctx = this.getContext();
+    const page = await ctx.newPage();
+    const url = new URL(`${this.host}/${encodePathSegment(this.project)}/${encodePathSegment(pageTitle)}`);
+    await page.goto(url.toString(), { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.line');
+    if (opts.waitMs && opts.waitMs > 0) await page.waitForTimeout(opts.waitMs);
+
+    await applyOps(page, ops, lines);
+    await page.close();
+
+    const after = await this.readJson(pageTitle);
+    const afterText = linesToText(extractLines(after));
+    if (afterText !== newText) {
+      throw new Error('Verification failed (content mismatch after patch)');
+    }
+  }
 }
 
 function normalizeHost(host: string) {
@@ -108,4 +164,159 @@ function normalizeHost(host: string) {
 
 function encodePathSegment(s: string) {
   return encodeURIComponent(s);
+}
+
+function extractLines(pageJson: any): LineInfo[] {
+  const lines = Array.isArray(pageJson?.lines) ? pageJson.lines : [];
+  return lines.map((line: any) => ({ id: line.id, text: line.text ?? '' }));
+}
+
+function linesToText(lines: LineInfo[]): string {
+  return lines.map((l) => l.text ?? '').join('\n');
+}
+
+function parseFirstPatch(diffText: string) {
+  const patches = parsePatch(diffText);
+  if (!patches.length) throw new Error('No patch found in diff');
+  return patches[0];
+}
+
+function splitLines(value: string) {
+  const lines = value.split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+function buildOps(originalText: string, newText: string): PatchOp[] {
+  const changes = diffLines(originalText, newText);
+  const ops: PatchOp[] = [];
+  let index = 0;
+
+  for (const part of changes) {
+    const lines = splitLines(part.value);
+    if (part.added) {
+      if (lines.length) ops.push({ type: 'insert', index, lines });
+      continue;
+    }
+    if (part.removed) {
+      if (lines.length) ops.push({ type: 'remove', index, count: lines.length });
+      index += lines.length;
+      continue;
+    }
+    index += lines.length;
+  }
+
+  return ops;
+}
+
+type OpGroup = { removeCount: number; insertLines: string[] };
+
+function groupOps(ops: PatchOp[]) {
+  const groups = new Map<number, OpGroup>();
+  for (const op of ops) {
+    const group = groups.get(op.index) ?? { removeCount: 0, insertLines: [] };
+    if (op.type === 'remove') {
+      group.removeCount += op.count;
+    } else {
+      group.insertLines.push(...op.lines);
+    }
+    groups.set(op.index, group);
+  }
+  return groups;
+}
+
+async function applyOps(page: Page, ops: PatchOp[], lines: LineInfo[]) {
+  const groups = groupOps(ops);
+  const indices = [...groups.keys()].sort((a, b) => b - a);
+
+  for (const index of indices) {
+    const group = groups.get(index)!;
+    if (group.removeCount > 0) {
+      await deleteLines(page, index, group.removeCount, lines);
+    }
+    if (group.insertLines.length > 0) {
+      await insertLines(page, index, group.insertLines, lines, group.removeCount);
+    }
+  }
+}
+
+async function deleteLines(page: Page, index: number, count: number, lines: LineInfo[]) {
+  for (let i = 0; i < count; i++) {
+    const lineInfo = lines[index + i];
+    const line = await findLine(page, lineInfo, index);
+    await line.scrollIntoViewIfNeeded();
+    await line.click();
+    await selectAll(page);
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(30);
+  }
+}
+
+async function insertLines(page: Page, index: number, insertLines: string[], lines: LineInfo[], removedCount: number) {
+  if (insertLines.length === 0) return;
+
+  if (index === 0) {
+    const anchorIndex = Math.min(index + removedCount, lines.length - 1);
+    const anchorInfo = lines[anchorIndex];
+    if (anchorInfo) {
+      const anchor = await findLine(page, anchorInfo, anchorIndex);
+      await anchor.scrollIntoViewIfNeeded();
+      await anchor.click();
+      await moveToStart(page);
+      await page.keyboard.press('Enter');
+      await page.keyboard.insertText(insertLines.join('\n'));
+      await page.waitForTimeout(30);
+      return;
+    }
+  }
+
+  const anchorIndex = Math.max(0, index - 1);
+  const anchorInfo = lines[anchorIndex];
+  const anchor = await findLine(page, anchorInfo, anchorIndex);
+  await anchor.scrollIntoViewIfNeeded();
+  await anchor.click();
+  await moveToEnd(page);
+  await page.keyboard.press('Enter');
+  await page.keyboard.insertText(insertLines.join('\n'));
+  await page.waitForTimeout(30);
+}
+
+async function findLine(page: Page, info: LineInfo | undefined, index: number) {
+  if (info?.id) {
+    const selectors = [
+      `[data-line-id="${info.id}"]`,
+      `[data-id="${info.id}"]`,
+      `[data-lineid="${info.id}"]`,
+    ];
+    for (const selector of selectors) {
+      const loc = page.locator(selector);
+      if ((await loc.count()) > 0) return loc.first();
+    }
+  }
+
+  const byIndex = page.locator('.line').nth(index);
+  if ((await byIndex.count()) > 0) return byIndex;
+
+  if (info?.text) {
+    const byText = page.locator('.line', { hasText: info.text });
+    if ((await byText.count()) > 0) return byText.first();
+  }
+
+  throw new Error(`Line not found at index ${index}`);
+}
+
+async function selectAll(page: Page) {
+  const isMac = process.platform === 'darwin';
+  await page.keyboard.press(isMac ? 'Meta+A' : 'Control+A');
+}
+
+async function moveToStart(page: Page) {
+  const isMac = process.platform === 'darwin';
+  await page.keyboard.press(isMac ? 'Meta+ArrowLeft' : 'Home');
+}
+
+async function moveToEnd(page: Page) {
+  const isMac = process.platform === 'darwin';
+  await page.keyboard.press(isMac ? 'Meta+ArrowRight' : 'End');
 }

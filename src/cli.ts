@@ -13,6 +13,8 @@ USAGE:
   scrapbox-skill append --project <name> --page <title> --body "text"
   scrapbox-skill append --project <name> --page <title> --body-file /path/to/file
   echo "text" | scrapbox-skill append --project <name> --page <title>
+  scrapbox-skill patch --project <name> --page <title> --diff-file file.diff
+  cat file.diff | scrapbox-skill patch --project <name> --page <title>
 
 OPTIONS:
   --project <name>   Project name (or SCRAPBOX_PROJECT / COSENSE_PROJECT)
@@ -22,8 +24,13 @@ OPTIONS:
   --sid <value>      connect.sid cookie (or SCRAPBOX_SID / COSENSE_SID)
   --host <url>       Default: https://scrapbox.io (or SCRAPBOX_HOST / COSENSE_HOST)
   --headless <bool>  Default: true
-  --wait <ms>        Wait after open (append). Default: 1500
+  --wait <ms>        Wait after open (append/patch). Default: 1500
   --json             Output JSON (list)
+  --diff <text>      Unified diff text (patch)
+  --diff-file <path> Unified diff file (patch)
+  --check-updated    Abort if page updated before patch
+  --fuzz <n>         Apply patch with fuzz (default 0)
+  --dry-run          Do not edit; output patched text
 `);
 }
 
@@ -70,6 +77,17 @@ async function getBody(opts: Record<string, any>) {
     return await fs.readFile(opts['body-file'], 'utf8');
   }
   if (opts.body) return opts.body as string;
+  if (!process.stdin.isTTY) {
+    return await readStdin();
+  }
+  return '';
+}
+
+async function getDiff(opts: Record<string, any>) {
+  if (opts['diff-file']) {
+    return await fs.readFile(opts['diff-file'], 'utf8');
+  }
+  if (opts.diff) return opts.diff as string;
   if (!process.stdin.isTTY) {
     return await readStdin();
   }
@@ -127,6 +145,24 @@ async function main() {
       }
       const waitMs = opts.wait ? Number(opts.wait) : 1500;
       await client.append(pageTitle, body, waitMs);
+      return;
+    }
+
+    if (command === 'patch') {
+      const pageTitle = requireValue('page', (opts.page as string) || (opts.title as string) || (opts._ as string[])[0]);
+      const diffText = await getDiff(opts);
+      if (!diffText) {
+        console.error('Missing diff (use --diff / --diff-file / stdin).');
+        process.exit(1);
+      }
+      const waitMs = opts.wait ? Number(opts.wait) : 1500;
+      const fuzz = opts.fuzz ? Number(opts.fuzz) : 0;
+      const checkUpdated = Boolean(opts['check-updated']);
+      const dryRun = Boolean(opts['dry-run']);
+      const result = await client.patch(pageTitle, diffText, { fuzz, checkUpdated, waitMs, dryRun });
+      if (dryRun && typeof result === 'string') {
+        process.stdout.write(result);
+      }
       return;
     }
 

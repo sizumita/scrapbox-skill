@@ -44,6 +44,13 @@ node {baseDir}/dist/cli.js append --page "タイトル" --body "本文"
 cat note.txt | node {baseDir}/dist/cli.js append --page "タイトル"
 ```
 
+### 差分パッチ適用（カーソル操作で部分更新）
+```bash
+node {baseDir}/dist/cli.js patch --page "タイトル" --diff-file changes.diff --check-updated
+# または
+cat changes.diff | node {baseDir}/dist/cli.js patch --page "タイトル"
+```
+
 ## 使い方（TSライブラリ）
 ```ts
 import { ScrapboxClient } from "./dist/index.js";
@@ -59,5 +66,6 @@ await client.close();
 
 ## 注意点
 - `append` は `?body=` を使うため **既存ページは末尾追記**。
+- `patch` は **行単位のカーソル操作**で部分更新するため、DOMやエディタ変更で壊れる可能性あり。
 - `connect.sid` は秘匿。ログや返答に出さない。
 - デバッグ時は `--headless false` を使う。
