@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { chromium } from 'playwright';
 import { ScrapboxClient } from './client.js';
 
 function usage() {
@@ -7,6 +10,7 @@ function usage() {
 Scrapbox/Cosense CLI (Playwright)
 
 USAGE:
+  scrapbox-skill login --project <name> [--headless false]
   scrapbox-skill read --project <name> --page <title>
   scrapbox-skill read-json --project <name> --page <title>
   scrapbox-skill list --project <name> [--limit 100] [--skip 0]
@@ -23,7 +27,7 @@ OPTIONS:
   --body-file <path> Read body from file
   --sid <value>      connect.sid cookie (or SCRAPBOX_SID / COSENSE_SID)
   --host <url>       Default: https://scrapbox.io (or SCRAPBOX_HOST / COSENSE_HOST)
-  --headless <bool>  Default: true
+  --headless <bool>  Default: true (loginはfalse推奨)
   --wait <ms>        Wait after open (append/patch). Default: 1500
   --json             Output JSON (list)
   --diff <text>      Unified diff text (patch)
@@ -66,7 +70,7 @@ async function readStdin() {
   return new Promise<string>((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => (data += chunk));
+    process.stdin.on('data', (chunk: string) => (data += chunk));
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
@@ -83,6 +87,10 @@ async function getBody(opts: Record<string, any>) {
   return '';
 }
 
+const CRED_PATH = path.join(os.homedir(), '.openclaw', 'credentials', 'scrapbox-skill.json');
+
+type StoredCred = { host: string; sid: string; project?: string; savedAt?: string };
+
 async function getDiff(opts: Record<string, any>) {
   if (opts['diff-file']) {
     return await fs.readFile(opts['diff-file'], 'utf8');
@@ -92,6 +100,47 @@ async function getDiff(opts: Record<string, any>) {
     return await readStdin();
   }
   return '';
+}
+
+async function loadStoredSid(host: string) {
+  try {
+    const raw = await fs.readFile(CRED_PATH, 'utf8');
+    const data = JSON.parse(raw) as StoredCred;
+    if (data?.host === host && data.sid) return data.sid;
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+async function saveStoredSid(host: string, sid: string, project?: string) {
+  const dir = path.dirname(CRED_PATH);
+  await fs.mkdir(dir, { recursive: true });
+  const payload: StoredCred = { host, sid, project, savedAt: new Date().toISOString() };
+  await fs.writeFile(CRED_PATH, JSON.stringify(payload, null, 2), { mode: 0o600 });
+}
+
+async function waitForEnter() {
+  return new Promise<void>((resolve) => {
+    process.stdin.once('data', () => resolve());
+  });
+}
+
+async function loginAndSaveSid(host: string, project: string, headless: boolean) {
+  if (!process.stdin.isTTY) throw new Error('login requires interactive terminal');
+  const browser = await chromium.launch({ headless });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const url = new URL(`${host}/${encodeURIComponent(project)}`);
+  await page.goto(url.toString(), { waitUntil: 'domcontentloaded' });
+  console.error('ブラウザでログインできたら Enter を押してね');
+  await waitForEnter();
+  const cookies = await context.cookies(host);
+  const sid = cookies.find((c) => c.name === 'connect.sid')?.value;
+  await browser.close();
+  if (!sid) throw new Error('connect.sid not found (login failed?)');
+  await saveStoredSid(host, sid, project);
+  console.error(`connect.sid saved: ${CRED_PATH}`);
 }
 
 async function main() {
@@ -105,9 +154,17 @@ async function main() {
   const opts = parseArgs(argv.slice(1));
 
   const project = (opts.project as string) || process.env.SCRAPBOX_PROJECT || process.env.COSENSE_PROJECT;
-  const sid = (opts.sid as string) || process.env.SCRAPBOX_SID || process.env.COSENSE_SID;
   const host = (opts.host as string) || process.env.SCRAPBOX_HOST || process.env.COSENSE_HOST || 'https://scrapbox.io';
   const headless = String(opts.headless ?? 'true') !== 'false';
+
+  if (command === 'login') {
+    const loginHeadless = opts.headless !== undefined ? String(opts.headless) !== 'false' : false;
+    await loginAndSaveSid(host, requireValue('project', project), loginHeadless);
+    return;
+  }
+
+  let sid = (opts.sid as string) || process.env.SCRAPBOX_SID || process.env.COSENSE_SID;
+  if (!sid) sid = await loadStoredSid(host);
 
   const client = await ScrapboxClient.create({ project: requireValue('project', project), sid, host, headless });
 

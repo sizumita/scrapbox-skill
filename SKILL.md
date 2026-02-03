@@ -22,6 +22,14 @@ npm run build
 - `SCRAPBOX_SID`（または `COSENSE_SID`）: `connect.sid`
 - `SCRAPBOX_HOST`（または `COSENSE_HOST`）: 省略時 `https://scrapbox.io`
 
+### connect.sid をWebログインで保存
+```bash
+node {baseDir}/dist/cli.js login --project "プロジェクト名" --headless false
+```
+
+保存先: `~/.openclaw/credentials/scrapbox-skill.json`
+（以降は `--sid` を省略可能）
+
 ### 読み取り（テキスト）
 ```bash
 node {baseDir}/dist/cli.js read --page "タイトル"

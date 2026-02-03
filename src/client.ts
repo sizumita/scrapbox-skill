@@ -1,7 +1,5 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
-import Diff from 'diff';
-
-const { applyPatch, parsePatch, diffLines } = Diff;
+import { applyPatch, parsePatch, diffLines } from 'diff';
 
 export type ClientOptions = {
   project: string;
@@ -125,7 +123,7 @@ export class ScrapboxClient {
     const originalText = linesToText(lines);
 
     const patch = parseFirstPatch(diffText);
-    const newText = applyPatch(originalText, patch, { fuzz: opts.fuzz ?? 0 });
+    const newText = applyPatch(originalText, patch, { fuzzFactor: opts.fuzz ?? 0 });
     if (newText === false) throw new Error('Patch apply failed');
 
     if (opts.dryRun) return newText;
