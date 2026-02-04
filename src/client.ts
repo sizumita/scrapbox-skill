@@ -107,13 +107,23 @@ export class ScrapboxClient {
   }
 
   async append(pageTitle: string, body: string, waitMs = 1500) {
+    const lines = splitLines(body);
+    await this.appendLines(pageTitle, lines, waitMs);
+  }
+
+  async appendLines(pageTitle: string, lines: string[], waitMs = 1500) {
     const ctx = this.getContext();
     const page = await ctx.newPage();
-    const url = new URL(`${this.host}/${encodePathSegment(this.project)}/${encodePathSegment(pageTitle)}`);
-    url.searchParams.set('body', body);
-    await page.goto(url.toString(), { waitUntil: 'domcontentloaded' });
-    if (waitMs > 0) await page.waitForTimeout(waitMs);
-    await page.close();
+    try {
+      for (const line of lines) {
+        const url = new URL(`${this.host}/${encodePathSegment(this.project)}/${encodePathSegment(pageTitle)}`);
+        url.searchParams.set('body', line);
+        await page.goto(url.toString(), { waitUntil: 'domcontentloaded' });
+        if (waitMs > 0) await page.waitForTimeout(waitMs);
+      }
+    } finally {
+      await page.close();
+    }
   }
 
   async patch(pageTitle: string, diffText: string, opts: PatchOptions = {}): Promise<string | void> {
