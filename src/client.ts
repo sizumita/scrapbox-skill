@@ -106,6 +106,33 @@ export class ScrapboxClient {
     return await res.json();
   }
 
+  async search(query: string, opts: ListOptions = {}) {
+    const ctx = this.getContext();
+    const limit = opts.limit ?? 100;
+    const skip = opts.skip ?? 0;
+    const encodedProject = encodePathSegment(this.project);
+    const q = encodeURIComponent(query);
+    const endpoints = [
+      `/api/pages/${encodedProject}/search/query?q=${q}&limit=${encodeURIComponent(String(limit))}&skip=${encodeURIComponent(String(skip))}`,
+      `/api/pages/${encodedProject}/search?q=${q}&limit=${encodeURIComponent(String(limit))}&skip=${encodeURIComponent(String(skip))}`,
+    ];
+
+    for (const apiPath of endpoints) {
+      const res = await ctx.request.get(`${this.host}${apiPath}`);
+      if (res.ok()) return await res.json();
+    }
+
+    const data = await this.list({ limit, skip });
+    const needle = query.toLowerCase();
+    const pages = (data.pages || []).filter((p: any) => {
+      const title = String(p.title || '').toLowerCase();
+      if (title.includes(needle)) return true;
+      const descriptions = Array.isArray(p.descriptions) ? p.descriptions : [];
+      return descriptions.some((d: string) => String(d).toLowerCase().includes(needle));
+    });
+    return { ...data, pages, _fallback: true, query };
+  }
+
   async append(pageTitle: string, body: string, waitMs = 1500) {
     const lines = splitLines(body);
     await this.appendLines(pageTitle, lines, waitMs);

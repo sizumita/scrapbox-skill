@@ -45,6 +45,11 @@ node {baseDir}/dist/cli.js read-json --page "タイトル"
 node {baseDir}/dist/cli.js list --limit 100 --skip 0
 ```
 
+### 検索
+```bash
+node {baseDir}/dist/cli.js search --query "keyword" --limit 100 --skip 0
+```
+
 ### 追記（作成/末尾追加）
 ```bash
 node {baseDir}/dist/cli.js append --page "タイトル" --body "本文"

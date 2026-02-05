@@ -14,6 +14,7 @@ USAGE:
   scrapbox-skill read --project <name> --page <title>
   scrapbox-skill read-json --project <name> --page <title>
   scrapbox-skill list --project <name> [--limit 100] [--skip 0]
+  scrapbox-skill search --project <name> --query "keyword" [--limit 100] [--skip 0]
   scrapbox-skill append --project <name> --page <title> --body "text"
   scrapbox-skill append --project <name> --page <title> --body-file /path/to/file
   echo "text" | scrapbox-skill append --project <name> --page <title>
@@ -23,6 +24,7 @@ USAGE:
 OPTIONS:
   --project <name>   Project name (or SCRAPBOX_PROJECT / COSENSE_PROJECT)
   --page <title>     Page title
+  --query <text>     Search query
   --body <text>      Body to append (URL-encoded automatically)
   --body-file <path> Read body from file
   --sid <value>      connect.sid cookie (or SCRAPBOX_SID / COSENSE_SID)
@@ -185,6 +187,19 @@ async function main() {
       const limit = opts.limit ? Number(opts.limit) : 100;
       const skip = opts.skip ? Number(opts.skip) : 0;
       const data = await client.list({ limit, skip });
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(data, null, 2));
+      } else {
+        for (const p of data.pages || []) console.log(p.title);
+      }
+      return;
+    }
+
+    if (command === 'search') {
+      const query = requireValue('query', (opts.query as string) || (opts.q as string) || (opts._ as string[])[0]);
+      const limit = opts.limit ? Number(opts.limit) : 100;
+      const skip = opts.skip ? Number(opts.skip) : 0;
+      const data = await client.search(query, { limit, skip });
       if (opts.json) {
         process.stdout.write(JSON.stringify(data, null, 2));
       } else {
