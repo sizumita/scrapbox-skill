@@ -16,6 +16,12 @@ npx playwright install chromium
 npm run build
 ```
 
+**セットアップ確認** -- ビルド後にテスト読み取りで接続を検証する:
+```bash
+node {baseDir}/dist/cli.js list --limit 1
+```
+成功すれば1件のページタイトルが返る。認証エラーの場合は `login` コマンドで `connect.sid` を再取得する。
+
 ## 使い方（CLI）
 **環境変数（推奨）**
 - `SCRAPBOX_PROJECT`（または `COSENSE_PROJECT`）
@@ -64,6 +70,8 @@ node {baseDir}/dist/cli.js patch --page "タイトル" --diff-file changes.diff 
 cat changes.diff | node {baseDir}/dist/cli.js patch --page "タイトル"
 ```
 
+`--check-updated` を付けるとリモート側の変更を検出する。競合が検出された場合は `read` で最新内容を取得し、diffを再作成してから `patch` を再実行する。カーソル操作による更新が失敗した場合は `--headless false` でブラウザを目視確認する。
+
 ## 使い方（TSライブラリ）
 ```ts
 import { ScrapboxClient } from "./dist/index.js";
@@ -80,7 +88,7 @@ await client.close();
 ## 注意点
 - `append` は `?body=` を使うため **既存ページは末尾追記**。
 - `append` は本文を改行で分割し**1行ずつ追記**する（Scrapbox形式を崩さないため）。
-- **Markdown記法ではなくScrapbox記法**で書くこと（1行=1項目、リストは `-` 行）。
+- **Markdown記法ではなきScrapbox記法**で書くこと（1行=1項目、リストは `-` 行）。
 - `patch` は **内部APIがあればそれを優先**、無ければ行単位のカーソル操作で部分更新（DOMやエディタ変更で壊れる可能性あり）。
 - `connect.sid` は秘匿。ログや返答に出さない。
 - デバッグ時は `--headless false` を使う。
